@@ -1,0 +1,85 @@
+# ---------- Stage 3: lock it down ----------
+
+# Application Security Groups: rules refer to these instead of IP ranges
+resource "azurerm_application_security_group" "tier" {
+  for_each            = toset(["web", "app", "db"])
+  name                = "asg-${each.key}"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.this.name
+}
+
+resource "azurerm_network_interface_application_security_group_association" "tier" {
+  for_each = {
+    web = module.vm_web.nic_id
+    app = module.vm_app.nic_id
+    db  = module.vm_db.nic_id
+  }
+  network_interface_id          = each.value
+  application_security_group_id = azurerm_application_security_group.tier[each.key].id
+}
+
+module "nsg_web" {
+  source    = "../../modules/nsg"
+  name      = "webnsg"
+  rg        = azurerm_resource_group.this.name
+  location  = var.location
+  subnet_id = module.network.subnet_ids["web"]
+  rules = {
+    allow-internet-web = {
+      priority    = 100
+      access      = "Allow"
+      ports       = ["80", "443"]
+      src_prefix  = "Internet"
+      dst_asg_ids = [azurerm_application_security_group.tier["web"].id]
+    }
+    deny-all = {
+      priority   = 4000
+      access     = "Deny"
+      src_prefix = "*"
+    }
+  }
+}
+
+module "nsg_app" {
+  source    = "../../modules/nsg"
+  name      = "appnsg"
+  rg        = azurerm_resource_group.this.name
+  location  = var.location
+  subnet_id = module.network.subnet_ids["app"]
+  rules = {
+    allow-web-8080 = {
+      priority    = 100
+      access      = "Allow"
+      ports       = ["8080"]
+      src_asg_ids = [azurerm_application_security_group.tier["web"].id]
+      dst_asg_ids = [azurerm_application_security_group.tier["app"].id]
+    }
+    deny-all = {
+      priority   = 4000
+      access     = "Deny"
+      src_prefix = "*"
+    }
+  }
+}
+
+module "nsg_db" {
+  source    = "../../modules/nsg"
+  name      = "dbnsg"
+  rg        = azurerm_resource_group.this.name
+  location  = var.location
+  subnet_id = module.network.subnet_ids["db"]
+  rules = {
+    allow-app-5432 = {
+      priority    = 100
+      access      = "Allow"
+      ports       = ["5432"]
+      src_asg_ids = [azurerm_application_security_group.tier["app"].id]
+      dst_asg_ids = [azurerm_application_security_group.tier["db"].id]
+    }
+    deny-all = {
+      priority   = 4000
+      access     = "Deny"
+      src_prefix = "*"
+    }
+  }
+}

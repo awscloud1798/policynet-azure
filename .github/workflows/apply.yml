@@ -1,0 +1,48 @@
+name: apply
+on:
+  push:
+    branches: [main]
+    paths: ["envs/**", "modules/**"]
+  workflow_dispatch:
+permissions:
+  id-token: write
+  contents: read
+concurrency: policynet-dev
+env:
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - working-directory: envs/dev
+        run: |
+          terraform init -input=false
+          terraform apply -input=false -auto-approve
+
+  test:
+    needs: apply
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - run: pip install azure-cli==2.65.0
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Run the six-rule test
+        run: |
+          terraform -chdir=envs/dev init -input=false
+          o() { terraform -chdir=envs/dev output -raw "$1"; }
+          sleep 90
+          bash tests/matrix.sh "$(o rg_name)" "$(o web_public_ip)" "$(o web_private_ip)" "$(o app_private_ip)" "$(o db_private_ip)"

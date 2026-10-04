@@ -1,0 +1,15 @@
+#cloud-config
+write_files:
+  - path: /etc/systemd/system/probe.service
+    content: |
+      [Unit]
+      Description=Probe listener
+      After=network.target
+      [Service]
+      ExecStart=/usr/bin/python3 -m http.server ${port} --directory /tmp
+      Restart=always
+      [Install]
+      WantedBy=multi-user.target
+runcmd:
+  - systemctl daemon-reload
+  - systemctl enable --now probe.service

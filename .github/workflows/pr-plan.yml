@@ -1,0 +1,38 @@
+name: pr-plan
+on:
+  pull_request:
+    paths: ["envs/**", "modules/**", "policy/**"]
+permissions:
+  id-token: write
+  contents: read
+env:
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
+      - uses: terraform-linters/setup-tflint@v4
+      - run: tflint --recursive
+      - run: pip install checkov && checkov -d . --framework terraform --compact --quiet --soft-fail
+      - name: Plan
+        working-directory: envs/dev
+        run: |
+          terraform init -input=false
+          terraform validate
+          terraform plan -input=false -no-color -out=tfplan | tee plan.txt
+          terraform show -json tfplan > plan.json
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat plan.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+      # Enable after Stage 5 (step 20 in the guide): remove the leading '#' on the next 4 lines
+      # - name: Policy check (conftest)
+      #   run: |
+      #     curl -sL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_x86_64.tar.gz | tar xz
+      #     ./conftest test envs/dev/plan.json -p policy
